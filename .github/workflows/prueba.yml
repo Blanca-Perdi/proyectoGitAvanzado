@@ -1,0 +1,26 @@
+name: Comprobacion de tokens
+
+on:
+  push:
+
+jobs:
+  comprobar-token:
+    runs-on: [self-hosted, macOS, ARM64]
+
+    steps:
+      - name: Comparar token de desarrollo
+        shell: bash
+        env:
+          DEV_TOKEN_GITHUB: ${{ secrets.DEV_TOKEN }}
+        run: |
+          if [ -z "$DEV_TOKEN_GITHUB" ] || [ -z "$LOCAL_DEV_TOKEN" ]; then
+            echo "ERROR: Falta configurar alguno de los tokens."
+            exit 1
+          fi
+
+          if [ "$DEV_TOKEN_GITHUB" = "$LOCAL_DEV_TOKEN" ]; then
+            echo "CORRECTO: Los tokens coinciden."
+          else
+            echo "ERROR: Los tokens no coinciden."
+            exit 1
+          fi
