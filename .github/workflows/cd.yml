@@ -1,0 +1,85 @@
+
+name: Despliegue continuo
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-version:
+    name: Actualizar version del README
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Incrementar version
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          MENSAJE=$(git log -1 --pretty=%s)
+          echo "Ultimo commit: $MENSAJE"
+
+          if [[ ! "$MENSAJE" =~ ^Merge\ pull\ request\ \#[0-9]+\ from\ [^/]+/develop$ ]]; then
+            echo "No es una fusion de develop. No se incrementa la version."
+            exit 0
+          fi
+
+          VERSION=$(grep -oE 'AppVersion-[0-9]+' README.md | head -1)
+          NUMERO=${VERSION#AppVersion-}
+          NUEVA_VERSION="AppVersion-$((NUMERO + 1))"
+
+          echo "Version anterior: $VERSION"
+          echo "Version nueva: $NUEVA_VERSION"
+
+          git checkout -b "automation/readme-cd-${GITHUB_RUN_ID}"
+
+          sed -i "s/$VERSION/$NUEVA_VERSION/" README.md
+
+          FECHA=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          echo "Actualizacion de version: $FECHA" >> README.md
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add README.md
+          git commit -m "docs: actualizar version a $NUEVA_VERSION"
+          git push origin HEAD
+
+          gh pr create \
+            --base main \
+            --head "automation/readme-cd-${GITHUB_RUN_ID}" \
+            --title "docs: actualizar version a $NUEVA_VERSION" \
+            --body "Actualizacion automatica de version generada por CD."
+
+  validate-prod:
+    name: Validar token de produccion
+    needs: update-version
+    runs-on: [self-hosted, macOS, ARM64]
+
+    steps:
+      - name: Comprobar token PROD
+        env:
+          PROD_TOKEN: ${{ secrets.PROD_TOKEN }}
+        run: |
+          if [ "$PROD_TOKEN" = "$LOCAL_PROD_TOKEN" ]; then
+            echo "Token de produccion correcto"
+          else
+            echo "ERROR: los tokens de produccion no coinciden"
+            exit 1
+          fi
