@@ -1,0 +1,86 @@
+
+name: Despliegue continuo
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-version:
+    name: Actualizar version del README
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Incrementar version
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          set -e
+
+          if [ ! -f README.md ]; then
+            echo "ERROR: README.md no existe."
+            exit 1
+          fi
+
+          MENSAJE=$(git log -1 --pretty=%s)
+          echo "Ultimo commit: $MENSAJE"
+
+          if [[ "$MENSAJE" == "docs: actualizar version"* ]]; then
+            echo "El ultimo commit ya actualizo la version."
+            exit 0
+          fi
+
+          VERSION=$(grep -oE 'AppVersion-[0-9]+' README.md | head -1 || true)
+
+          if [ -z "$VERSION" ]; then
+            echo "ERROR: no se encuentra AppVersion-N en README.md"
+            exit 1
+          fi
+
+          NUMERO=${VERSION#AppVersion-}
+          NUEVO_NUMERO=$((NUMERO + 1))
+          NUEVA_VERSION="AppVersion-$NUEVO_NUMERO"
+
+          echo "Version anterior: $VERSION"
+          echo "Version nueva: $NUEVA_VERSION"
+
+          sed -i "s/$VERSION/$NUEVA_VERSION/" README.md
+
+          FECHA=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          echo "Actualizacion de version: $FECHA" >> README.md
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add README.md
+          git commit -m "docs: actualizar version a $NUEVA_VERSION"
+          git push origin HEAD:main
+
+  validate-prod:
+    name: Validar token de produccion
+    needs: update-version
+    runs-on: [self-hosted, macOS, ARM64]
+
+    steps:
+      - name: Comprobar token PROD
+        env:
+          PROD_TOKEN: ${{ secrets.PROD_TOKEN }}
+        run: |
+          if [ "$PROD_TOKEN" = "$LOCAL_PROD_TOKEN" ]; then
+            echo "Token de produccion correcto"
+          else
+            echo "ERROR: los tokens de produccion no coinciden"
+            exit 1
+          fi
