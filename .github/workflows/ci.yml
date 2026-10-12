@@ -3,16 +3,15 @@ name: Integracion continua
 
 on:
   pull_request:
-    branches:
-      - develop
+    branches: [develop]
     types: [opened, synchronize, reopened]
   push:
-    branches:
-      - develop
+    branches: [develop]
   workflow_dispatch:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   update-readme:
@@ -22,48 +21,49 @@ jobs:
     steps:
       - name: Descargar repositorio
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Registrar nueva feature
         if: github.event_name == 'push'
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          echo "Identificando la funcionalidad incorporada..."
+          set -euo pipefail
+
           MENSAJE=$(git log -1 --pretty=%s)
           echo "Ultimo commit: $MENSAJE"
 
-          if [[ "$MENSAJE" =~ ^Merge\ pull\ request\ #[0-9]+\ from\ [^/]+/(.+)$ ]]; then
+          if [[ "$MENSAJE" =~ ^Merge\ pull\ request\ \#[0-9]+\ from\ [^/]+/(feature/.+)$ ]]; then
             RAMA="${BASH_REMATCH[1]}"
-            echo "Rama identificada: $RAMA"
-
-            if [[ "$RAMA" == feature/* ]]; then
-              LINEA="Añadida feature: $RAMA"
-
-              if [ ! -f README.md ]; then
-                touch README.md
-              fi
-
-              if ! grep -Fxq "$LINEA" README.md; then
-                echo "$LINEA" >> README.md
-                echo "Funcionalidad registrada en README.md"
-              else
-                echo "Esta funcionalidad ya estaba registrada."
-              fi
-            else
-              echo "La rama incorporada no es una feature."
-            fi
           else
-            echo "No se ha identificado una rama de feature en este commit."
+            echo "No se ha identificado una fusion de feature."
+            exit 0
           fi
 
-          if [ -n "$(git status --porcelain -- README.md)" ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add README.md
-            git commit -m "docs: registrar nueva feature"
-            git push origin HEAD:develop
-          else
-            echo "No hay cambios en README.md que guardar."
+          LINEA="Añadida feature: $RAMA"
+
+          if grep -Fxq "$LINEA" README.md; then
+            echo "Feature ya registrada."
+            exit 0
           fi
+
+          git checkout -b "automation/readme-ci-${GITHUB_RUN_ID}"
+          echo "$LINEA" >> README.md
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add README.md
+          git commit -m "docs: registrar $RAMA"
+          git push origin HEAD
+
+          gh pr create \
+            --base develop \
+            --head "automation/readme-ci-${GITHUB_RUN_ID}" \
+            --title "docs: registrar $RAMA" \
+            --body "Actualizacion automatica del README generada por CI."
 
   validate-dev:
     name: Validar token de desarrollo
